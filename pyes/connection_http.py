@@ -9,6 +9,7 @@ import threading
 import time
 import urllib
 from pyes.exceptions import NoServerAvailable
+import base64
 import urllib3
 import urllib
 from httplib import HTTPConnection, HTTPSConnection
@@ -51,14 +52,14 @@ class TimeoutHttpsConnectionPool(urllib3.HTTPSConnectionPool):
         self.num_connections += 1
         
         if not ssl:
-            log.info("Falling back to HTTP due to no ssl?")
             return HTTPSConnection(host=self.host, port=self.port)
 
         log.info("Starting new HTTPS connection (%d): %s" % (self.num_connections, self.host))
         if sys.version_info < (2, 6):
             # TODO: Figure out appropriate behavior here.
-            log.info("Falling back to HTTP?")
-            return HTTPSConnection(host=self.host, port=int(self.port))
+            log.info("sys version_info < (2,6)")
+            # return HTTPSConnection(host=self.host, port=int(self.port))
+            return None
 
         connection = urllib3.VerifiedHTTPSConnection(host=self.host, 
                                                      port=self.port)
@@ -69,17 +70,33 @@ class TimeoutHttpsConnectionPool(urllib3.HTTPSConnectionPool):
 class ClientTransport(object):
     """Encapsulation of a client session."""
 
-    def __init__(self, server, framed_transport, timeout, recycle, ssl_data):
+    def __init__(self, server, framed_transport, timeout, recycle, ssl_data,
+                 basic_auth):
         host, port = server.split(":")
+        headers = None
+
+        if basic_auth:
+            headers = {}
+            username = basic_auth.get('username')
+            password = basic_auth.get('password')
+            base64string = base64.encodestring('%s:%s' % 
+                                               (username, password))[:-1]
+            headers["Authorization"] = ("Basic %s" % base64string)
+
         if ssl_data:
             self.client = TimeoutHttpsConnectionPool(host, port, timeout,
-                                                     1, False, None,
+                                                     1, False, headers,
                                                      ssl_data.get('key_file'),
                                                      ssl_data.get('cert_file'),
                                                      ssl_data,get('cert_reqs'),
                                                      ssl_data.get('ca_certs'))
         else:
-            self.client = TimeoutHttpConnectionPool(host, port, timeout)
+            self.client = TimeoutHttpConnectionPool(host, port, timeout, headers=headers)
+
+        if self.client is None:
+            log.info("client wasn't created.")
+            return
+
         setattr(self.client, "execute", self.execute)
         if recycle:
             self.recycle = time.time() + recycle + random.uniform(0, recycle * 0.1)
@@ -97,7 +114,8 @@ class ClientTransport(object):
         return RestResponse(status=response.status, body=response.data, headers=response.headers)
 
 def connect(servers=None, framed_transport=False, timeout=None, retry_time=60, 
-            recycle=None, round_robin=None, max_retries=3, ssl_data=None):
+            recycle=None, round_robin=None, max_retries=3, ssl_data=None,
+            basic_auth=None):
     """
     Constructs a single ElastiSearch connection. Connects to a randomly chosen
     server on the list.
@@ -142,6 +160,12 @@ def connect(servers=None, framed_transport=False, timeout=None, retry_time=60,
                  * cert_file
                  * cert_reqs
                  * ca_certs
+    basic_auth: dict
+              Use HTTP Basic Auth. Use ssl while using basic auth to keep the
+              password from being transmitted in the clear.
+              Expects keys:
+                 * username
+                 * password
     Returns
     -------
     ES client
@@ -151,7 +175,7 @@ def connect(servers=None, framed_transport=False, timeout=None, retry_time=60,
         servers = [DEFAULT_SERVER]
     return ThreadLocalConnection(servers, framed_transport, timeout,
                                  retry_time, recycle, max_retries=max_retries,
-                                 ssl_data=ssl_data)
+                                 ssl_data=ssl_data, basic_auth=basic_auth)
 
 connect_thread_local = connect
 
@@ -202,6 +226,7 @@ class ThreadLocalConnection(object):
         self._recycle = recycle
         self._max_retries = max_retries
         self._ssl_data = ssl_data
+        self._basic_auth = basic_auth
         self._local = threading.local()
 
     def __getattr__(self, attr):
@@ -240,7 +265,8 @@ class ThreadLocalConnection(object):
                 log.debug('Connecting to %s', server)
                 self._local.conn = ClientTransport(server, self._framed_transport,
                                                    self._timeout, self._recycle,
-                                                   self._ssl_data)
+                                                   self._ssl_data, 
+                                                   self._basic_auth)
             except (socket.timeout, socket.error):
                 log.warning('Connection to %s failed.', server)
                 self._servers.mark_dead(server)

@@ -184,7 +184,9 @@ class ES(object):
                  default_types=None,
                  dump_curl=False,
                  model=ElasticSearchModel,
-                 connect_via_http=False):
+                 connect_via_http=False,
+                 ssl_data=None,
+                 basic_auth=None):
         """
         Init a es object
         
@@ -195,7 +197,10 @@ class ES(object):
         max_retries: number of max retries for server if a server is down
         autorefresh: check if need a refresh before a query
         model: used to objectify the dictinary. If None, the raw dict is returned.
-        http_connection: Use an http connection no matter what the port is.
+        connect_via_http: Use an http connection no matter what the port is.
+        ssl_data: Dict with keys used by HTTPSConnection: key_file, cert_file,
+                  cert_reqs, ca_certs.
+        basic_auth: Dict with keys for HTTP Basic Auth: username, password.
 
         dump_curl: If truthy, this will dump every query to a curl file.  If
         this is set to a string value, it names the file that output is sent
@@ -212,6 +217,8 @@ class ES(object):
         self.autorefresh = autorefresh
         self.refreshed = True
         self.connect_via_http = connect_via_http
+        self.ssl_data = ssl_data
+        self.basic_auth = basic_auth
 
         if model is None:
             model = lambda connection, model: model
@@ -263,7 +270,7 @@ class ES(object):
         #detect connectiontype
         port = self.servers[0].split(":")[1]
         if self.connect_via_http or port.startswith("92"):
-            self.connection = http_connect(self.servers, timeout=self.timeout, max_retries=self.max_retries)
+            self.connection = http_connect(self.servers, timeout=self.timeout, max_retries=self.max_retries, ssl_data=self.ssl_data, basic_auth=self.basic_auth)
             return
         if not thrift_enable:
             raise RuntimeError("If you want to use thrift, please install thrift. \"pip install thrift\"")
