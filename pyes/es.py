@@ -183,7 +183,8 @@ class ES(object):
                  default_indices=['_all'],
                  default_types=None,
                  dump_curl=False,
-                 model=ElasticSearchModel):
+                 model=ElasticSearchModel,
+                 connect_via_http=False):
         """
         Init a es object
         
@@ -194,6 +195,7 @@ class ES(object):
         max_retries: number of max retries for server if a server is down
         autorefresh: check if need a refresh before a query
         model: used to objectify the dictinary. If None, the raw dict is returned.
+        http_connection: Use an http connection no matter what the port is.
 
         dump_curl: If truthy, this will dump every query to a curl file.  If
         this is set to a string value, it names the file that output is sent
@@ -209,6 +211,7 @@ class ES(object):
         self.connection = None
         self.autorefresh = autorefresh
         self.refreshed = True
+        self.connect_via_http = connect_via_http
 
         if model is None:
             model = lambda connection, model: model
@@ -259,7 +262,7 @@ class ES(object):
         """
         #detect connectiontype
         port = self.servers[0].split(":")[1]
-        if port.startswith("92"):
+        if self.connect_via_http or port.startswith("92"):
             self.connection = http_connect(self.servers, timeout=self.timeout, max_retries=self.max_retries)
             return
         if not thrift_enable:
