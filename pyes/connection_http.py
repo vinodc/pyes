@@ -13,6 +13,7 @@ import base64
 import urllib3
 import urllib
 from httplib import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import VerifiedHTTPSConnection
 from fakettypes import *
 import socket
 import sys
@@ -61,8 +62,8 @@ class TimeoutHttpsConnectionPool(urllib3.HTTPSConnectionPool):
             # return HTTPSConnection(host=self.host, port=int(self.port))
             return None
 
-        connection = urllib3.VerifiedHTTPSConnection(host=self.host, 
-                                                     port=self.port)
+        connection = VerifiedHTTPSConnection(host=self.host, 
+                                             port=self.port)
         connection.set_cert(key_file=self.key_file, cert_file=self.cert_file, cert_reqs=self.cert_reqs, ca_certs=self.ca_certs)
         return connection
 
@@ -72,23 +73,29 @@ class ClientTransport(object):
 
     def __init__(self, server, framed_transport, timeout, recycle, ssl_data,
                  basic_auth):
+        """
+        Headers are stored and used on each request, rather than stored in the
+        ConnectionPool object, to enable updating of Content-Length header on
+        each request without modifying urllib3.
+        """
+        self.headers = {}
+
         host, port = server.split(":")
-        headers = None
 
         if basic_auth:
-            headers = {}
             username = basic_auth.get('username')
             password = basic_auth.get('password')
             base64string = base64.encodestring('%s:%s' % 
                                                (username, password))[:-1]
-            headers["Authorization"] = ("Basic %s" % base64string)
+            self.headers["Authorization"] = ("Basic %s" % base64string)
 
         if ssl_data:
             self.client = TimeoutHttpsConnectionPool(host, port, timeout,
-                                                     1, False, headers,
+                                                     1, False, None,
                                                      ssl_data.get('key_file'),
                                                      ssl_data.get('cert_file'),
-                                                     ssl_data,get('cert_reqs'),
+                                                     ssl_data.get('cert_reqs', 
+                                                                  'CERT_NONE'),
                                                      ssl_data.get('ca_certs'))
         else:
             self.client = TimeoutHttpConnectionPool(host, port, timeout, headers=headers)
@@ -110,14 +117,16 @@ class ClientTransport(object):
         uri = request.uri
         if request.parameters:
             uri += '?' + urllib.urlencode(request.parameters)
-        response = self.client.urlopen(Method._VALUES_TO_NAMES[request.method], uri, body=request.body, headers=request.headers)
+        headers = self.headers.copy()
+        headers.update(request.headers)
+        response = self.client.urlopen(Method._VALUES_TO_NAMES[request.method], uri, body=request.body, headers=headers)
         return RestResponse(status=response.status, body=response.data, headers=response.headers)
 
 def connect(servers=None, framed_transport=False, timeout=None, retry_time=60, 
             recycle=None, round_robin=None, max_retries=3, ssl_data=None,
             basic_auth=None):
     """
-    Constructs a single ElastiSearch connection. Connects to a randomly chosen
+    Constructs a single ElasticSearch connection. Connects to a randomly chosen
     server on the list.
 
     If the connection fails, it will attempt to connect to each server on the
@@ -219,7 +228,8 @@ class ServerSet(object):
 
 class ThreadLocalConnection(object):
     def __init__(self, servers, framed_transport=False, timeout=None,
-                 retry_time=10, recycle=None, max_retries=3, ssl_data=None):
+                 retry_time=10, recycle=None, max_retries=3, ssl_data=None,
+                 basic_auth=None):
         self._servers = ServerSet(servers, retry_time)
         self._framed_transport = framed_transport #not used in http
         self._timeout = timeout
