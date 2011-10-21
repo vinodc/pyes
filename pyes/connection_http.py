@@ -62,8 +62,8 @@ class TimeoutHttpsConnectionPool(urllib3.HTTPSConnectionPool):
             # return HTTPSConnection(host=self.host, port=int(self.port))
             return None
 
-        connection = VerifiedHTTPSConnection(host=self.host, 
-                                             port=self.port)
+        connection = VerifiedHTTPSConnection(host=self.host, port=self.port,
+                                             timeout=self.timeout)
         connection.set_cert(key_file=self.key_file, cert_file=self.cert_file, cert_reqs=self.cert_reqs, ca_certs=self.ca_certs)
         return connection
 
