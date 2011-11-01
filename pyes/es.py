@@ -19,6 +19,7 @@ import base64
 import time
 from StringIO import StringIO
 from decimal import Decimal
+from urllib import quote
 import copy
 
 try:
@@ -343,7 +344,7 @@ class ES(object):
         """
         Smush together the path components. Empty components will be ignored.
         """
-        path_components = [str(component) for component in path_components if component]
+        path_components = [quote(str(component), "") for component in path_components if component]
         path = '/'.join(path_components)
         if not path.startswith('/'):
             path = '/' + path
@@ -842,6 +843,8 @@ class ES(object):
                 cmd[op_type]['_version'] = version
             if 'routing' in querystring_args:
                 cmd[op_type]['_routing'] = querystring_args['routing']
+            if 'percolate' in querystring_args:
+                cmd[op_type]['percolate'] = querystring_args['percolate']
             if id:
                 cmd[op_type]['_id'] = id
 
@@ -896,7 +899,7 @@ class ES(object):
                 if len(self.bulk_data):
                     batch = self.bulk_data
                     self.bulk_data = []
-                    self.last_bulk_response = self._send_request("POST", "/_bulk", "\n".join(batch))
+                    self.last_bulk_response = self._send_request("POST", "/_bulk", "\n".join(batch) + "\n")
                 else:
                     self.last_bulk_response = None
             finally:
@@ -1387,9 +1390,9 @@ class ResultSet(object):
                     start = 0
                 else:
                     start -= 1
-                end = val.stop or self.total()
+                end = val.stop or self.total
                 if end < 0:
-                    end = self.total() + end
+                    end = self.total + end
                 return start, end
             return val, val + 1
 
