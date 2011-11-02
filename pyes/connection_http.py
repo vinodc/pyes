@@ -98,11 +98,7 @@ class ClientTransport(object):
                                                                   'CERT_NONE'),
                                                      ssl_data.get('ca_certs'))
         else:
-            self.client = TimeoutHttpConnectionPool(host, port, timeout, headers=headers)
-
-        if self.client is None:
-            log.info("client wasn't created.")
-            return
+            self.client = TimeoutHttpConnectionPool(host, port, timeout)
 
         setattr(self.client, "execute", self.execute)
         if recycle:
